@@ -1,0 +1,440 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+# Data Story: Airbnbs in New York City
+
+This data story looks at New York City and where we can find the most Airbnbs based on whether they are short term or long term rentals. 
+
+# Data
+
+The data for Airbnb contains detailed information on all of the approximately fifty thousand private apartment listings for rent through the site in New York City. The data on Airbnbs is for a time before the COVID pandemic to remove that additional complication for data analysis. In addition to using Styled Google Maps using API and leaflet for the spatial analysis, I also use a GeoJSON file containing all of the neighborhoods in NYC.
+
+**Selected Variables in Airbnb Data:**
+
+-   `id`: ID number of the listing
+-   `transit`: description of the transit options
+-   `host_id`: a unique ID for the host
+-   `host_listings_count`: how many places does the host rent out?
+-   `latitude`/`longitude`: the Geo coordinates
+-   `room_type` / `accommodates` / `bathrooms` / `bedrooms`: some info about the place, like number of bed- and bathrooms, whether it is shared etc.
+-   `price`: nightly price
+-   `availability_365`: What part of the year is the property available to be rented?
+-   Number of reviews / Review scores
+
+## Task
+
+This story comes in two parts. In the first, I show where AirBnB listings can be found in New York City, first using a cluster map with plotted points representing Airbnbs, then showing the density of the Airbnb listings and highlighting the hot-spots for Airbnb locations. 
+
+In the second part of the assignment, I use the variable 'availability_365', to determine which Airbnb listings are only available for a few days, and which are available for an entire year. I then separated long-term Airbnbs from short term by putting any rentals available 300 days or more into the permanent Airbnb category, and any listings available for less than 300 days into the short-term listings category. With four density maps, I then highlight the neighborhoods where most listings appear to be permanent or semi-permanent rentals. Lastly, I take the neighborhoods in NYC with the highest overall number of rentals a display the number of short-term to long-term rentals in a grouped bar graph and interactive data table. 
+
+### 1. Overall Location
+```{R}
+#Import Libraries
+library(maps)
+library(tidyverse)
+library(dplyr)
+library(rgdal)
+library(mapproj)
+library(raster)
+library(ggmap)
+library(shiny)
+library(leaflet)
+library(htmlwidgets)
+library(ggthemes)
+library(RColorBrewer)
+library(ggplot2)
+library(DT)
+library(tmap)
+library(RcmdrPlugin.KMggplot2)
+library(plotly)
+
+#import csv file
+df = read.csv("/Users/jayzee/Documents/qmss_spring22/dataviz/assignment-2-airbnb-camilla-zhang/data/airbnb_listings.csv")
+airbnb = df[c("transit","host_id","host_listings_count", "latitude", "longitude", "room_type", "accommodates", "bathrooms", "price", "availability_365", "neighbourhood_cleansed", "neighbourhood_group_cleansed", "review_scores_rating", "number_of_reviews")] #Subset only to needed columns
+colnames(airbnb)[11] = "neighbourhood"
+colnames(airbnb)[12] = "BoroName"
+airbnb_og = airbnb
+
+#Set API Key
+#register_google(key = "AIzaSyAUOoBmdJZMsao-e_fJxS12ZPulASY_lqY", write = TRUE)
+register_google(key = Sys.getenv("google_api_key"), write = TRUE)
+
+#Get map from API
+map_st = get_map("New York City", source = "stamen", maptype = "toner-background", zoom = 11) #Black/white style
+map_st_lite = get_map("New York City", source = "stamen", maptype = "toner-lite", zoom = 11) #Grey/White style
+
+
+#Plot map from API
+g = ggmap(map_st) + 
+  theme_map() +
+  geom_point(aes(x = longitude, y = latitude), data = airbnb,
+                 size = 0.3, alpha = 0.9, color = "blue") +
+  labs(title = "Airbnbs in NYC")
+g
+```
+```{r}
+#Get Map
+m = leaflet(airbnb) %>%
+  addTiles() %>%
+  addCircles(color = "red") %>%
+  setView(lng = -73.93, lat = 40.7, zoom = 9.5)
+
+#Get Clustering Points
+clustering = m %>% 
+  addCircleMarkers(color = "pink",
+                   clusterOptions = markerClusterOptions()) %>%
+  setView(lng = -73.93, lat = 40.7, zoom = 9.5)
+  
+clustering
+
+saveWidget(clustering, file = "clustermap.html")
+```
+I used two visuals to show all of the Airbnbs in New York City: The first is a stamen map, and the second is a clustered leaflet map. I then added clustering points in the leaflet map to show where the areas with the biggest cluster of Airbnbs are located. We can see that there are many clusters, with the biggest clusters being in upper Manhattan, lower-east Manhattan, and east Brooklyn. Overall, Both maps show that NYC has a countless number of available Airbnbs, and most of them are located within Manhattan and in neighborhoods or boroughs bordering Manhattan. However, the farther from Manhattan, the fewer the available Airbnbs there are. 
+
+```{r}
+g_density = ggmap(map_st_lite) + 
+  theme_map() +
+  labs(title = "AirBnBs in NYC") +
+  geom_density_2d(aes(x = longitude, y = latitude), color = "purple",
+                  data = airbnb, size = 0.5) +
+  stat_density_2d(aes(x = longitude, 
+                      y = latitude, 
+                      fill = ..level.., 
+                      alpha = ..level..), 
+                  data = airbnb, 
+                  geom = "polygon") + 
+  scale_fill_gradient(low = "yellow", high = "red", breaks = c(50, 100, 150, 200), labels = c("Very low", "Low", "High", "Very High")) +
+  labs(fill = "Density", title = "Density of Airbnbs") +
+  guides(alpha = FALSE) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme_simple() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        legend.title=element_text(size=10), 
+        legend.text=element_text(size=7)) +
+  annotate("text", x = -73.9866, y = 40.7540, label = "Midtown", color = "Blue", fontface = 2, size = 2.25) +
+  annotate("text", x = -73.9815, y = 40.7265, label = "LES", color = "Blue", fontface = 2, size = 2.5) +
+  annotate("text", x = -73.9571, y = 40.7081, label = "Williamsburg", color = "Blue", fontface = 2, size = 2) +
+   annotate("text", x = -73.9418, y = 40.6872, label = "Bed-Stuy", color = "Blue", fontface = 2, size = 1.75) +
+  annotate("text", x = -73.9171, y = 40.6958, label = "Bushwick", color = "Blue", fontface = 2, size = 1.75)+
+  annotate("text", x = -73.9465, y = 40.8116, label = "Harlem", color = "Blue", fontface = 2, size = 1.75) +
+  annotate("text", x = -73.9665, y = 40.7812, label = "Central Park", color = "Blue", fontface = 2, size = 1.75) 
+  
+g_density 
+```
+I combined a contour and density graph to show the Airbnb hot spots, and added annotations for the biggest hot spots for Airbnbs in New York City. The larger Airbnb hot spots are depicted in red, while the smaller hotspots are shaded in yellow. The largest hot spots were in East village and Midtown between Times Square and Herald Square, followed by a few popular locations in Brooklyn (Williamsburg, Bed-stuy, and Bushwick). Central Park and Harlem were also pretty popular areas that rented out Airbnbs. It seems as though the hot spots are located in areas where rent in NYC is quite high. According to Property Nest (2022), Midtown is the area with the most expensive rent in NYC, with Soho (near LES) coming in third. 
+
+### 2. Short term vs. permanent rentals
+```{r}
+## SPATIAL VISUALIZATION 1: Density Heat and Contour Facet Wrap Map ##
+
+#Create Categorical Variable of Availability: 1 if > 300, 0 if less.
+airbnb$available_cat = as.factor(ifelse(airbnb$availability_365 > 299, "300 days or more", "less than 300 days"))
+#Create Categorical Variable of Availability: 1 if > 300, 0 if less.
+airbnb$available_count = as.factor(ifelse(airbnb$availability_365 > 299, 1, 0))
+
+
+## Facet Map ##
+
+g_density = ggmap(map_st) + 
+  theme_map() +
+  labs(title = "Airbnbs in NYC") +
+  geom_density_2d(aes(x = longitude, y = latitude), color = "purple",
+                  data = airbnb, size = 0.5) +
+  stat_density_2d(aes(x = longitude, 
+                      y = latitude, 
+                      fill = ..level.., 
+                      alpha = ..level..), 
+                  data = airbnb, 
+                  geom = "polygon") + 
+  scale_fill_gradient(low = "yellow", high = "red", breaks = c(50, 100, 150, 200), labels = c("Very low", "Low", "High", "Very High")) +
+  labs(fill = "Density", title = "Density of Airbnbs") +
+  guides(alpha = FALSE) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme_simple() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        legend.title=element_text(size=10), 
+        legend.text=element_text(size=7))
+
+#Create names list 
+names = c(
+  'less than 300 days' = "Semi-Permanent Rentals",
+  '300 days or more' = "Permanent Rentals"
+  )
+#Create Facet Map
+g_facet = g_density + 
+  theme_map() +
+  labs(title = "Airbnbs in NYC") + 
+  facet_wrap(~available_cat, ncol = 2, labeller = as_labeller(names)) +
+  labs(title = "Airbnbs by year-round availability") + 
+  theme(text = element_text(family = "Georgia"))
+
+## 2 Leaflet clustering points of graph with different colors and popup ##
+
+#Print Data
+g_facet
+```
+
+```{r}
+## SPATIAL VISUALIZATION 2: Density T-Map ##
+
+#Group by neighborhood
+airbnb = airbnb %>% 
+    group_by(neighbourhood) %>%
+    summarize(airbnbs = n(),
+              available_300_days_or_more = sum(available_count == 1), #count all instances where availiability was more then 300 days
+              available_less_than_300_days = sum(available_count == 0)) %>% #count all instances where availiability was less then 300 days
+    arrange(-desc(airbnbs))
+
+#Get Neighborhoods
+hoods = readOGR("/Users/jayzee/Documents/qmss_spring22/dataviz/assignment-2-airbnb-camilla-zhang/data/neighbourhoods.geojson")
+airbnb2= merge(hoods, airbnb, duplicateGeoms = T) #Combine Spatial Polygon DF with data
+
+#Convert neighborhoods with NAs to 0s
+airbnb2[is.na(airbnb2$available_300_days_or_more)] = 0
+airbnb2[is.na(airbnb2$available_less_than_300_days)] = 0
+
+#Get the neighborhoods with the most airbnbs
+top_over = airbnb2$available_300_days_or_more > 300
+top_under = airbnb2$available_less_than_300_days > 2000
+
+tm1 = tm_shape(airbnb2) + tm_fill("available_300_days_or_more", title = "Count") + tmap_options(check.and.fix = TRUE) +  tm_shape(airbnb2[ top_over, ]) + 
+        # Note, we need to add tm_shape() again
+      tm_borders(col = "black", lwd = 2) +
+      tm_layout(title="Permanent Airbnbs") +
+      tm_text("neighbourhood", size=.5, shadow=TRUE,
+              bg.color="white", bg.alpha=.5, 
+              remove.overlap=FALSE) 
+
+
+tm2 = tm_shape(airbnb2) + tm_fill("available_less_than_300_days", title = "Count") + tmap_options(check.and.fix = TRUE) + tm_shape(airbnb2[ top_under, ]) + 
+        # Note, we need to add tm_shape() again
+      tm_borders(col = "black", lwd = 2) +
+      tm_layout(title="Semi-Permanent Airbnbs") +
+      tm_text("neighbourhood", size=.5, shadow=T,
+              bg.color="white", bg.alpha=.5, 
+              remove.overlap=F) 
+
+tmap_arrange(tm1, tm2, asp = 1)
+```
+The first two visualizations show 2 heat density maps side by side. These images are able to compare which types of rentals were most popular. The third and fourth visualizations are also density maps, with color coding and outlining the neighborhoods that contain the most availability for year-round rentals and semi-peramnent rentals, respectively.
+
+Based on the first two density heat map, I found that the highest concentration of year-round listings are located in Midtown, followed by neighborhoods in in East Brooklyn, then neighborhoods in lower Manhattan. Based on the density t-map, the most popular neighborhoods for selling long-term Airbnbs are: Bed-Stuy, Bushwick, Williamsburg, Midtown, Hell's Kitchen, UWS, and Harlem. The most popular neighborhoods for selling short-term Airbnbs are: Williamsburg, Bed-Stuy, Bushwick, and Harlem.
+
+Distinguishing the hotspot locations for each type of Airbnbs is important because it highlights the areas where illegal Airbnbs are located relative to long-term Airbnbs. Entire homes or apartments highly available and rented frequently as short-term rentals are illegal and are displacing New Yorkers. Short term-rentals onfen do not have the proper fire safety systems or security personnel that can help travelers. More importantly, those that book short-term Airbnbs in permanent rental areas tend to produce more noise and litter, thus are compromising the comfort of long-term New York residents.
+
+```{r}
+## NON-SPATIAL VISUALIZATIONS ##
+
+#Non-Spatial Visualization 1: Bar Graph
+
+#Get the neighborhoods with more than 900 airbnbs total
+most_airbnbs= airbnb2@data %>%
+  arrange(-desc(airbnbs)) %>%
+  filter(airbnbs > 900) #filter to neighborhoods w/> 900 airbnbs
+
+#Plot graph
+most_airbnbs = most_airbnbs %>% tidyr::pivot_longer(c('available_300_days_or_more', 'available_less_than_300_days', "airbnbs"),  names_to = "Availability", values_to = "airbnb_count") 
+#Visualize the top 10 countries
+most_airbnbs_plot = ggplot(most_airbnbs, aes(reorder(x = neighbourhood, airbnb_count), y = airbnb_count, fill = Availability)) + 
+  geom_col(position = "dodge") +
+  coord_flip() +
+  theme(text = element_text(family = "Times New Roman"))+
+  scale_fill_discrete(name = "Airbnb Availability Type", labels = c("All Airbnbs", "Permanent Airbnbs", "Short-term Airbnbs")) +
+  labs(title = "Comparing Airbnb availability type for neighborhoods with the most airbnbs") +
+  xlab("Neighbourhood") +
+  ylab("Airbnb Availability Type") + 
+  theme_tufte()
+most_airbnbs_plot
+
+#Non-Spatial Visualization 2: Dataframe
+
+airbnbdf = airbnb2@data #Convert sp dataframe -> dataframe
+airbnbdf$proportion_of_permanent_airbnbs = (airbnbdf$available_300_days_or_more)/(airbnbdf$airbnbs) #Create new column for proportion of available airbnbs
+
+airbnbdf <- airbnbdf %>% 
+    rowwise() %>% 
+    filter(neighbourhood != 0)
+
+pretty_headers = #Clean up headers for dataframe
+  gsub("_", " ", colnames(airbnbdf)) %>% #Replace any variables with _ with a space
+  str_to_title()
+
+## Dataframe ##
+airbnbdf %>%
+  datatable(
+  rownames = F,
+  colnames = pretty_headers,
+  filter = list(position = "top"), #add a filter for every column
+  options  = list(
+    pageLength = 5, #Shows 5 entries rather than the default
+    language = list(sSearch = "Filter:"), #Replace "Search" with Filter
+    order = list("2", 'desc')) #Order DT in descending order by games total
+)
+```
+Based on the data table and bar graph, we can see that Williamsburg has the most number of Airbnbs overall, followed by Bed-Stuy, then Harlem. We also see that those areas also have the greatest number of listings that are available for fewer days per year. However, when sorting the fourth column, available listings for 300 days or more, we see that Bed-Stuy has the greatest number of Airbnbs that are available almost all year, followed by Hell's Kitchen, then Midtown. We can also sort it by the proportion of Airbnbs that are available almost year round, and find that out of all neighborhoods with at least 100 available Airbnbs, Canarsie, Theater District, and Jamaica have the largest proportion of available year-round Airbnbs.
+
+```{r}
+#Group by host
+airbnb_hosts = airbnb_og %>%
+  arrange(-desc(host_id))
+
+#Convert price to int
+airbnb_hosts$price = sub("\\$", "", airbnb_hosts$price) #remove $
+airbnb_hosts$price = as.integer(airbnb_hosts$price) #chr -> int
+
+#For each Airbnb: Multiply Airbnb price with available days to get total Airbnb price per year
+airbnb_hosts$price_year = airbnb_hosts$price*airbnb_hosts$availability_365
+
+#Create 4 new variables: Airbnb price per year summed by host, all available Airbnb days summed by host, nightly prices summed by host, annual income of host
+airbnb_hosts2 = airbnb_hosts %>% 
+  group_by(host_id, host_listings_count) %>% 
+  summarize(price_year = sum(price_year),
+            total_days = sum(availability_365),
+            total_price_nightly = sum(price),
+            income_year = sum(price_year)
+            )
+
+airbnb_hosts2$host_listings_count[airbnb_hosts2$host_listings_count == 0] = 1 #Any Airbnbs with 0 count has a 1
+
+#Rename host_listings_count
+airbnb_hosts2$total_listings =airbnb_hosts2$host_listings_count
+airbnb_hosts2 = airbnb_hosts2 %>% dplyr::select(host_id, total_listings, price_year, total_days, total_price_nightly, income_year)
+
+#Add monthly income
+airbnb_hosts2$average_nightly_price = airbnb_hosts2$total_price_nightly/airbnb_hosts2$total_listings
+airbnb_hosts2$average_monthly_income = airbnb_hosts2$income_year/12
+airbnb_hosts2 = airbnb_hosts2 %>% dplyr::select(host_id, total_listings, average_nightly_price, average_monthly_income)
+
+#round using function round(column, digit = #)
+airbnb_hosts2$average_nightly_price = round(airbnb_hosts2$average_nightly_price, digit=2)
+airbnb_hosts2$average_monthly_income = round(airbnb_hosts2$average_monthly_income, digit=2)
+
+#Create better labels for DT
+pretty_headers = 
+  gsub("_", " ", colnames(airbnb_hosts2)) %>% #Replace any variables with _ with a space
+  str_to_title()
+
+#Filter down to top 100 hosts by monthly income
+airbnb_hosts2 = airbnb_hosts2 %>% 
+  filter(average_monthly_income >= 34840)
+
+#Convert to DT
+airbnb_hosts_DT = airbnb_hosts2 %>% 
+  datatable(
+  rownames = FALSE, 
+  colnames = pretty_headers,
+  filter = list(position = "top"), #add a filter for every column
+  options  = list(
+    pageLength = 10, #Shows first 10 entries per page
+    language = list(sSearch = "Filter:"), #Replace "Search" with Filter
+    order = list(3, 'desc')) #Automatic Sorting by monthly income
+  )
+airbnb_hosts_DT
+```
+
+I converted the Airbnb dataframe to a dataframe based on Airbnb hosts in this way:
+1. Summed all listings per host
+2. Summed all nightly Airbnb prices and divided by listings per host to attain the average nightly Airbnb per host
+3. Multiplied each Airbnb price with the number of available days per year for each host, to get the estimated annual income per host, then divided by 12 to get monthly income
+4. Filtered down to the top 100 hosts based on expected monthly income
+5. Sorted the DF automatically by monthly income
+
+In this problem, I measure success of an airbnb host by their expected monthly income. This dataframe, the monthly income column in particular, assumes that each host's available days will be completely booked out. If any days are left vacant, then that would reduce the actual income of an Airbnb host.
+
+
+### 3. Top Reviewed Rentals
+```{r}
+#Create Data
+
+#Add an index column, called airbnb_id
+airbnb_og$airbnb_id <- 1:nrow(airbnb_og)
+
+#Convert price to int
+airbnb_og$price = gsub("\\$", "", airbnb_hosts$price) #remove $
+airbnb_og$price = as.integer(airbnb_hosts$price) #chr -> int
+
+#Convert NAs to 0 in reviews
+airbnb_og$review_scores_rating[is.na(airbnb_og$review_scores_rating)] = 0
+
+#Filter to 100 most expensive airbnbs
+pricey_airbnbs = airbnb_og %>%
+  arrange(desc(price)) %>%
+  mutate(price_ranking = rank(desc(price), ties.method = "random")) %>%
+  dplyr::select(airbnb_id, price_ranking, host_id, latitude, longitude, room_type, neighbourhood, BoroName, price, review_scores_rating) %>%  
+  filter(price_ranking <= 100)
+
+#Filter to airbnbs with highest reviews
+top_airbnbs = airbnb_og %>% #Subset to airbnbs with > 60 reviews
+  filter(number_of_reviews > 60) %>%
+  arrange(desc(review_scores_rating)) %>%
+  mutate(top_ranking = rank(desc(review_scores_rating), ties.method = "random")) %>%
+  dplyr::select(airbnb_id, top_ranking, host_id, latitude, longitude, room_type, neighbourhood, BoroName, price, review_scores_rating) %>%
+  filter(top_ranking <= 100)
+
+#Check if any of the most expensive airbnbs are also one of the top airbnbs
+both_pricey_and_top = pricey_airbnbs %>%
+  filter(airbnb_id %in% top_airbnbs)
+
+#Join 2 dateframes w/dplyr::bind_rows(df1, df2)
+airbnb_data = dplyr::bind_rows(top_airbnbs, pricey_airbnbs)
+
+#Create dummy variable, expensive or top
+airbnb_data$pricey_or_top = ifelse(is.na(airbnb_data$price_ranking), "Top Rated", "Very Expensive") 
+
+#Create a variable that provides a ranking for both price and rating
+for(i in 1:length(airbnb_data$review_scores_rating)){
+  if (is.na(airbnb_data$top_ranking[i])){
+    airbnb_data$top_ranking[i] <- airbnb_data$price_ranking[i]
+    }
+}
+colnames(airbnb_data)[2] <- "Ranking" #Rename ranking column
+```
+
+```{r}
+#Map Points
+nyc_map = get_map("New York City", source = "stamen", maptype = "toner-lite", zoom = 11) #Get google map
+
+
+pricey_top_map = ggmap(nyc_map) +
+  geom_point(mapping = aes(x = longitude, 
+                           y = latitude, 
+                           color = Ranking, 
+                           shape = pricey_or_top, 
+                           label=neighbourhood, 
+                           label2=review_scores_rating, 
+                           label3=price, 
+                           text = paste('Longitude', longitude,
+                                              '<br>Latitude:', latitude, 
+                                              '<br>Ranking:', Ranking,
+                                              '<br>Airbnb Type:', pricey_or_top,
+                                              '<br>Neighbourhood:', neighbourhood,
+                                              '<br>Rating:', review_scores_rating,
+                                              '<br>Nightly Price:', price
+                                        ),
+                           ), 
+             data = airbnb_data, size = 2.5) + #labeln adds dummy aesthetics to add to tooltip
+  scale_color_gradient(low='black', high='light green') +
+  labs(title = "Most expensive and best NYC Airbnbs", shape = "Type of Airbnb") +
+  theme(text = element_text(family = "Georgia"))+
+  xlab("Longitude") +
+  ylab("Latitude") 
+
+ggplotly(pricey_top_map, tooltip = c("text"))
+```
+For my last visualization, I create an interactive map which shows the Top 100 most expensive and Top 100 best reviewed rentals in NYC. 
+
+For this map, I created two datasets with 2 different rankings: 
++ One for "top rated" based on the review scores rating (score between 0 to 100, from 0 being poorly rated to 100 being top rated). and number of ratings
++ One for "very expensive", based on nightly price
+
+The map also has a tool tip that includes additional information such as price, neighborhood, and nightly price.
+
+I filtered the datasets for both to the top 100 (expensive or highly rated), then merged the datasets together (I also made sure that the best 100 Airbnbs also did not overlap with the most expensive 100 Airbnbs). *One thing to note is that before filtering to 100 for the most expensive ratings, I subsetted the data to only include Airbnbs with over 60 reviews. This is because if I had not done this, there would have been way over 100 Airbnbs in NYC with a rating of 100. Also, any Airbnb's without a rating recieved a rating of 0.
+
+I then visualized the Airbnbs. The Triangles indicate Airbnbs that are in the 100 most expensive Airbnbs in NYC, and the Circles indicate Airbnbs that are in the 100 best Airbnbs in NYC. Darker shapes indicate a higher ranking (i.e the #1 most expensive Airbnb in NYC will be a black triangle, and the #100 best Airbnb in NYC will be a light green circle).
